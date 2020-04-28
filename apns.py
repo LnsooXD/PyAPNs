@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # PyAPNs was developed by Simon Whitaker <simon@goosoftware.co.uk>
 # Source available at https://github.com/simonwhitaker/PyAPNs
 #
@@ -42,7 +43,10 @@ except ImportError:
 
 from _ssl import SSL_ERROR_WANT_READ, SSL_ERROR_WANT_WRITE
 
-import json
+try:
+    import json
+except ImportError:
+    import simplejson as json
 
 _logger = logging.getLogger(__name__)
 
@@ -52,31 +56,31 @@ NOTIFICATION_COMMAND = 0
 ENHANCED_NOTIFICATION_COMMAND = 1
 
 NOTIFICATION_FORMAT = (
-    '!'   # network big-endian
-    'B'   # command
-    'H'   # token length
-    '32s' # token
-    'H'   # payload length
-    '%ds' # payload
-)
+     '!'   # network big-endian
+     'B'   # command
+     'H'   # token length
+     '32s' # token
+     'H'   # payload length
+     '%ds' # payload
+    )
 
 ENHANCED_NOTIFICATION_FORMAT = (
-    '!'   # network big-endian
-    'B'   # command
-    'I'   # identifier
-    'I'   # expiry
-    'H'   # token length
-    '32s' # token
-    'H'   # payload length
-    '%ds' # payload
-)
+     '!'   # network big-endian
+     'B'   # command
+     'I'   # identifier
+     'I'   # expiry
+     'H'   # token length
+     '32s' # token
+     'H'   # payload length
+     '%ds' # payload
+    )
 
 ERROR_RESPONSE_FORMAT = (
-    '!'   # network big-endian
-    'B'   # command
-    'B'   # status
-    'I'   # identifier
-)
+     '!'   # network big-endian
+     'B'   # command
+     'B'   # status
+     'I'   # identifier
+    )
 
 TOKEN_LENGTH = 32
 ERROR_RESPONSE_LENGTH = 6
@@ -140,7 +144,7 @@ class APNs(object):
         Returns an unsigned int from a packed big-endian (network) byte array
         """
         return unpack('>I', bytes)[0]
-
+    
     @staticmethod
     def unpacked_char_big_endian(bytes):
         """
@@ -183,6 +187,9 @@ class APNsConnection(object):
         self._ssl = None
         self.enhanced = enhanced
         self.connection_alive = False
+
+    def __del__(self):
+        self._disconnect();
 
     def _connect(self):
         # Establish an SSL connection
@@ -230,7 +237,7 @@ class APNsConnection(object):
                         sys.exc_clear()
                     else:
                        raise
-
+        
         self.connection_alive = True
         _logger.debug("%s APNS connection established" % self.__class__.__name__)
 
@@ -255,26 +262,23 @@ class APNsConnection(object):
         if self.enhanced: # nonblocking socket
             self._last_activity_time = time.time()
             _, wlist, _ = select.select([], [self._connection()], [], WAIT_WRITE_TIMEOUT_SEC)
-
+            
             if len(wlist) > 0:
                 length = self._connection().sendall(string)
                 if length == 0:
                     _logger.debug("sent length: %d" % length) #DEBUG
             else:
                 _logger.warning("write socket descriptor is not ready after " + str(WAIT_WRITE_TIMEOUT_SEC))
-
+            
         else: # blocking socket
             return self._connection().write(string)
 
 
 class PayloadAlert(object):
-    def __init__(self, body=None, title = None, subtitle = None, action_loc_key=None, loc_key=None,
+    def __init__(self, body=None, action_loc_key=None, loc_key=None,
                  loc_args=None, launch_image=None):
         super(PayloadAlert, self).__init__()
-        
         self.body = body
-        self.title = title
-        self.subtitle = subtitle
         self.action_loc_key = action_loc_key
         self.loc_key = loc_key
         self.loc_args = loc_args
@@ -282,13 +286,8 @@ class PayloadAlert(object):
 
     def dict(self):
         d = {}
-        
         if self.body:
             d['body'] = self.body
-        if self.title:
-            d['title'] = self.title
-        if self.subtitle:
-            d['subtitle'] = self.subtitle
         if self.action_loc_key:
             d['action-loc-key'] = self.action_loc_key
         if self.loc_key:
@@ -306,8 +305,7 @@ class PayloadTooLargeError(Exception):
 
 class Payload(object):
     """A class representing an APNs message payload"""
-    def __init__(self, alert=None, badge=None, sound=None, category=None, custom=None, content_available=False,
-                 mutable_content=False):
+    def __init__(self, alert=None, badge=None, sound=None, category=None, custom={}, content_available=False):
         super(Payload, self).__init__()
         self.alert = alert
         self.badge = badge
@@ -315,7 +313,6 @@ class Payload(object):
         self.category = category
         self.custom = custom
         self.content_available = content_available
-        self.mutable_content = mutable_content
         self._check_size()
 
     def dict(self):
@@ -338,12 +335,8 @@ class Payload(object):
         if self.content_available:
             d.update({'content-available': 1})
 
-        if self.mutable_content:
-            d.update({'mutable-content': 1})
-
         d = { 'aps': d }
-        if self.custom:
-            d.update(self.custom)
+        d.update(self.custom)
         return d
 
     def json(self):
@@ -371,36 +364,36 @@ class Frame(object):
     def add_item(self, token_hex, payload, identifier, expiry, priority):
         """Add a notification message to the frame"""
         item_len = 0
-        self.frame_data.extend(b'\2' + APNs.packed_uint_big_endian(item_len))
+        self.frame_data.extend('\2' + APNs.packed_uint_big_endian(item_len))
 
         token_bin = a2b_hex(token_hex)
         token_length_bin = APNs.packed_ushort_big_endian(len(token_bin))
-        token_item = b'\1' + token_length_bin + token_bin
+        token_item = '\1' + token_length_bin + token_bin
         self.frame_data.extend(token_item)
         item_len += len(token_item)
 
         payload_json = payload.json()
         payload_length_bin = APNs.packed_ushort_big_endian(len(payload_json))
-        payload_item = b'\2' + payload_length_bin + payload_json
+        payload_item = '\2' + payload_length_bin + payload_json
         self.frame_data.extend(payload_item)
         item_len += len(payload_item)
 
         identifier_bin = APNs.packed_uint_big_endian(identifier)
         identifier_length_bin = \
                 APNs.packed_ushort_big_endian(len(identifier_bin))
-        identifier_item = b'\3' + identifier_length_bin + identifier_bin
+        identifier_item = '\3' + identifier_length_bin + identifier_bin
         self.frame_data.extend(identifier_item)
         item_len += len(identifier_item)
 
         expiry_bin = APNs.packed_uint_big_endian(expiry)
         expiry_length_bin = APNs.packed_ushort_big_endian(len(expiry_bin))
-        expiry_item = b'\4' + expiry_length_bin + expiry_bin
+        expiry_item = '\4' + expiry_length_bin + expiry_bin
         self.frame_data.extend(expiry_item)
         item_len += len(expiry_item)
 
         priority_bin = APNs.packed_uchar(priority)
         priority_length_bin = APNs.packed_ushort_big_endian(len(priority_bin))
-        priority_item = b'\5' + priority_length_bin + priority_bin
+        priority_item = '\5' + priority_length_bin + priority_bin
         self.frame_data.extend(priority_item)
         item_len += len(priority_item)
 
@@ -440,7 +433,7 @@ class FeedbackConnection(APNsConnection):
         A generator that yields (token_hex, fail_time) pairs retrieved from
         the APNs feedback server
         """
-        buff = b''
+        buff = ''
         for chunk in self._chunks():
             buff += chunk
 
@@ -474,21 +467,21 @@ class GatewayConnection(APNsConnection):
     """
     A class that represents a connection to the APNs gateway server
     """
-
+    
     def __init__(self, use_sandbox=False, **kwargs):
         super(GatewayConnection, self).__init__(**kwargs)
         self.server = (
             'gateway.push.apple.com',
             'gateway.sandbox.push.apple.com')[use_sandbox]
         self.port = 2195
-        if self.enhanced == True: #start error-response monitoring thread
+        if self.enhanced == True: #start error-response monitoring thread       
             self._last_activity_time = time.time()
-
+            
             self._send_lock = threading.RLock()
             self._error_response_handler_worker = None
             self._response_listener = None
-
-        self._sent_notifications = collections.deque(maxlen=SENT_BUFFER_QTY)
+            
+            self._sent_notifications = collections.deque(maxlen=SENT_BUFFER_QTY)
 
     def _init_error_response_handler_worker(self):
         self._send_lock = threading.RLock()
@@ -524,7 +517,7 @@ class GatewayConnection(APNsConnection):
         notification = pack(fmt, ENHANCED_NOTIFICATION_COMMAND, identifier, expiry,
                             TOKEN_LENGTH, token, len(payload), payload)
         return notification
-
+         
     def send_notification(self, token_hex, payload, identifier=0, expiry=0):
         """
         in enhanced mode, send_notification may return error response from APNs if any
@@ -533,8 +526,8 @@ class GatewayConnection(APNsConnection):
             self._last_activity_time = time.time()
             message = self._get_enhanced_notification(token_hex, payload,
                                                            identifier, expiry)
-
-            for i in range(WRITE_RETRY):
+            
+            for i in xrange(WRITE_RETRY):
                 try:
                     with self._send_lock:
                         self._make_sure_error_response_handler_worker_alive()
@@ -543,20 +536,20 @@ class GatewayConnection(APNsConnection):
                     break
                 except socket_error as e:
                     delay = 10 + (i * 2)
-                    _logger.exception("sending notification with id:" + str(identifier) +
-                                 " to APNS failed: " + str(type(e)) + ": " + str(e) +
+                    _logger.exception("sending notification with id:" + str(identifier) + 
+                                 " to APNS failed: " + str(type(e)) + ": " + str(e) + 
                                  " in " + str(i+1) + "th attempt, will wait " + str(delay) + " secs for next action")
                     time.sleep(delay) # wait potential error-response to be read
 
         else:
             self.write(self._get_notification(token_hex, payload))
-
+    
     def _make_sure_error_response_handler_worker_alive(self):
-        if (not self._error_response_handler_worker
+        if (not self._error_response_handler_worker 
             or not self._error_response_handler_worker.is_alive()):
             self._init_error_response_handler_worker()
             TIMEOUT_SEC = 10
-            for _ in range(TIMEOUT_SEC):
+            for _ in xrange(TIMEOUT_SEC):
                 if self._error_response_handler_worker.is_alive():
                     _logger.debug("error response handler worker is running")
                     return
@@ -566,45 +559,45 @@ class GatewayConnection(APNsConnection):
     def send_notification_multiple(self, frame):
         self._sent_notifications += frame.get_notifications(self)
         return self.write(frame.get_frame())
-
+    
     def register_response_listener(self, response_listener):
         self._response_listener = response_listener
-
+    
     def force_close(self):
         if self._error_response_handler_worker:
             self._error_response_handler_worker.close()
-
+    
     def _is_idle_timeout(self):
         TIMEOUT_IDLE = 30
         return (time.time() - self._last_activity_time) >= TIMEOUT_IDLE
-
+    
     class ErrorResponseHandlerWorker(threading.Thread):
         def __init__(self, apns_connection):
             threading.Thread.__init__(self, name=self.__class__.__name__)
             self._apns_connection = apns_connection
             self._close_signal = False
-
+        
         def close(self):
             self._close_signal = True
-
+        
         def run(self):
             while True:
                 if self._close_signal:
                     _logger.debug("received close thread signal")
                     break
-
+                
                 if self._apns_connection._is_idle_timeout():
                     idled_time = (time.time() - self._apns_connection._last_activity_time)
                     _logger.debug("connection idle after %d secs" % idled_time)
                     break
-
+                
                 if not self._apns_connection.connection_alive:
                     time.sleep(1)
                     continue
-
+                
                 try:
                     rlist, _, _ = select.select([self._apns_connection._connection()], [], [], WAIT_READ_TIMEOUT_SEC)
-
+                    
                     if len(rlist) > 0: # there's some data from APNs
                         with self._apns_connection._send_lock:
                             buff = self._apns_connection.read(ERROR_RESPONSE_LENGTH)
@@ -620,23 +613,23 @@ class GatewayConnection(APNsConnection):
                             if len(buff) == 0:
                                 _logger.warning("read socket got 0 bytes data") #DEBUG
                                 self._apns_connection._disconnect()
-
+                                
                 except socket_error as e: # APNS close connection arbitrarily
                     _logger.exception("exception occur when reading APNS error-response: " + str(type(e)) + ": " + str(e)) #DEBUG
                     self._apns_connection._disconnect()
                     continue
-
+                            
                 time.sleep(0.1) #avoid crazy loop if something bad happened. e.g. using invalid certificate
-
+            
             self._apns_connection._disconnect()
             _logger.debug("error-response handler worker closed") #DEBUG
-
+    
         def _resend_notifications_by_id(self, failed_identifier):
             fail_idx = Util.getListIndexFromID(self._apns_connection._sent_notifications, failed_identifier)
             #pop-out success notifications till failed one
             self._resend_notification_by_range(fail_idx+1, len(self._apns_connection._sent_notifications))
             return
-
+    
         def _resend_notification_by_range(self, start_idx, end_idx):
             self._apns_connection._sent_notifications = collections.deque(itertools.islice(self._apns_connection._sent_notifications, start_idx, end_idx))
             _logger.info("resending %s notifications to APNS" % len(self._apns_connection._sent_notifications)) #DEBUG
@@ -652,7 +645,7 @@ class GatewayConnection(APNsConnection):
 class Util(object):
     @classmethod
     def getListIndexFromID(this_class, the_list, identifier):
-        return next(index for (index, d) in enumerate(the_list)
+        return next(index for (index, d) in enumerate(the_list) 
                         if d['id'] == identifier)
     @classmethod
     def convert_error_response_to_dict(this_class, error_response_tuple):
